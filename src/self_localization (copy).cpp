@@ -1,7 +1,7 @@
 #include <self_localization.hpp>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <tf/transform_listener.h>
-#include <algorithm>
+
 #include <string.h>
 #include <math.h>
 #include <mutex>
@@ -83,11 +83,6 @@ RobotLocalization::RobotLocalization() {
   position_publisher_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>(
                           "/initialpose", 1);
 
-  ptsize_publisher_ = nh.advertise<std_msgs::Int16>("pointcloud_size",1);
-
-  orb_sub_  = nh.subscribe("/orb_slam2_pose", 10,
-                           &RobotLocalization::orbCallback, this);
-
   map_sub_  = nh.subscribe("/map", 10,
                            &RobotLocalization::mapCallback, this);
   scan_sub_ = nh.subscribe("/scan", 10,
@@ -97,14 +92,9 @@ RobotLocalization::RobotLocalization() {
   debug_position_sub_ = nh.subscribe(
                           "/debug_position", 1, &RobotLocalization::debugAPosition, this);
 
-
   localization_server_ =
     nh.advertiseService(LOCATION_SERVICE,
                         &RobotLocalization::receiveLocalization, this);
-
-  positionX = 0;
-  positionY = 0;
-  orientation = 0;
 
   std::string service_name;
   nh.param("map_service", service_name, std::string("/static_map"));
@@ -112,8 +102,10 @@ RobotLocalization::RobotLocalization() {
 
   ros::NodeHandle nh_pravite("~/");
   nh_pravite.param("map_frame", map_frame_, std::string("/map"));
-  nh_pravite.param("robot_frame", robot_frame_, std::string("/base_link"));
-  nh_pravite.param("laser_frame", laser_frame_, std::string("/laser_link"));
+  //nh_pravite.param("robot_frame", robot_frame_, std::string("/base_link"));
+  nh_pravite.param("robot_frame", robot_frame_, std::string("/base_footprint"));
+  //nh_pravite.param("laser_frame", laser_frame_, std::string("/laser_link"));
+  nh_pravite.param("laser_frame", laser_frame_, std::string("/base_scan"));
   nh_pravite.param("tracking_frequency", tracking_frequency_, 1.0);
 
   map_frame_ = tf_listener_.resolve(map_frame_);
@@ -146,7 +138,6 @@ RobotLocalization::~RobotLocalization() {
   delete[] cached_costs_;
 }
 
-
 void RobotLocalization::mapCallback(const nav_msgs::OccupancyGrid& map) {
   ROS_DEBUG("mapCallback");
 
@@ -155,28 +146,8 @@ void RobotLocalization::mapCallback(const nav_msgs::OccupancyGrid& map) {
     ROS_WARN("Could not get a new map, trying to go with the old one...");
     return;
   }
-  mapOriginX = map.info.origin.position.x;
-  mapOriginY = map.info.origin.position.y;
-  mapResolu = map.info.resolution;
-  std::cout << "mapOriginX: " << abs(mapOriginX) << " mapOriginY: " << abs(mapOriginY) << std::endl;
+
   inflateMap();
-}
-
-void RobotLocalization::orbCallback(const geometry_msgs::PoseStamped::ConstPtr& msg){
-  positionX = msg->pose.position.x;
-  positionY = msg->pose.position.y;
-  orientation = msg->pose.orientation.z;
-  //ROS_INFO("positionX: %f positionY: %f orientation: %f",positionX,positionY,orientation);
-  coordinate(positionX,positionY);
-}
-
-Section RobotLocalization::coordinate(float coordx, float coordy){
-  displacement = clength/static_cast<float>(mapResolu);
-  //std::cout << "coordx: " << coordx << " coordy: " << coordy << std::endl;
-  sect.x = (abs(mapOriginY) + coordy)/static_cast<float>(mapResolu);
-  sect.y = (abs(mapOriginX) + coordx)/static_cast<float>(mapResolu);
-  std::cout << "orgin.x: " << sect.x << " orgin.y: " << sect.y << " displacement: " << displacement << std::endl;
-  return sect;
 }
 
 void RobotLocalization::odomCallback(const nav_msgs::Odometry& odom) {
@@ -185,7 +156,7 @@ void RobotLocalization::odomCallback(const nav_msgs::Odometry& odom) {
 }
 
 void RobotLocalization::scanCallback(const sensor_msgs::LaserScan& scan) {
- //  ROS_INFO("scanCallback, scan size: %d", scan.ranges.size());
+  // ROS_INFO("scanCallback, scan size: %d", scan.ranges.size());
 
  // mtx.lock();
   if (ros::ok()) {
@@ -198,9 +169,7 @@ void RobotLocalization::scanCallback(const sensor_msgs::LaserScan& scan) {
         const Eigen::AngleAxisf rotation(angle, Eigen::Vector3f::UnitZ());
         point_cloud_.push_back(rotation * (range * Eigen::Vector3f::UnitX()));
       }
-      std_msgs::Int16 ptr;
-      ptr.data = point_cloud_.size();
-      ptsize_publisher_.publish(ptr);
+
       angle += scan.angle_increment * laserscan_circle_step_;
     }
     // handleLaserScan();
@@ -231,19 +200,14 @@ void RobotLocalization::scoreLaserScanSamples() {
   // ROS_INFO("score the laserscan samples.");
   double score = 0.5;
   int count = 0;
+
   // ROS_INFO_STREAM("inflated map data size: " << inflated_map_data_.size());
   const int sample_size = laserscan_samples_[0].point_cloud.size();
   const int step = sample_size / quick_score_num_;
   // for ( int uv = 0; uv < inflated_map_data_.size(); ++uv )
-  int heightStart = std::max(0, static_cast<int>(sect.x - displacement/2));
-  int widthStart = std::max(0, static_cast<int>(sect.y - displacement/2));
-  int heightEnd = std::max(0, static_cast<int>(sect.x + displacement/2));
-  int widthEnd  = std::max(0, static_cast<int>(sect.y + displacement/2));
-  std::cout << "heightStart: " << heightStart << " widthStart: " << widthStart << std::endl;
-  std::cout << "heightEnd: " << heightEnd<< " widthEnd: " << widthEnd << std::endl;
-  //std::cout << "height_: " << height_ << " width_: " << width_ << std::endl;
-  for (int v = heightStart; v < heightEnd; v+= range_step_) {
-    for (int u = widthStart; u < widthEnd; u += range_step_) {
+
+  for (int v = 0; v < height_; v += range_step_) {
+    for (int u = 0; u < width_; u += range_step_) {
       const int uv = v * width_ + u;
       if (!inflated_map_data_[uv].first) {
         continue;
@@ -332,9 +296,8 @@ void RobotLocalization::scoreLaserScanSamples() {
 
   position_publisher_.publish(init_pose);
 
-
   ROS_INFO("Best score: %f, angle: %f, Best position: %f, %f, count: %d",
-           score, theta_robot/RADIAN_PRE_DEGREE, x_robot, y_robot, count);
+           score, theta_robot, x_robot, y_robot, count);
 }
 
 bool RobotLocalization::validPosition(const int uv, const int index) {

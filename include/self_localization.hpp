@@ -13,12 +13,12 @@
 #include <dynamic_reconfigure/server.h>
 #include <tf/transform_listener.h>
 #include <nav_msgs/Odometry.h>
-
 // localization
 #include <commands.hpp>
 #include <grid_map.hpp>
 #include <self_localization/LocalizationConfig.h>
-
+#include <geometry_msgs/PoseStamped.h>
+#include <std_msgs/Int16.h>
 // std
 #include <queue>
 #include <vector>
@@ -57,6 +57,13 @@ struct LaserScanSample {
   int min_x, max_x;
   int min_y, max_y;
 };
+
+// coordinate of the centre of a section
+struct Section
+  {
+    float x;
+    float y;
+  };
 
 class RobotLocalization {
  public:
@@ -100,11 +107,17 @@ class RobotLocalization {
 
   void reconfigureCB(Config& config, uint32_t level);
 
+  void orbCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+
   bool validPosition(const int uv, const int index);
 
   std::vector<Pixel> bresenham(const Pixel& start, const Pixel& end);
 
   void odomCallback(const nav_msgs::Odometry& odom);
+
+
+  
+  Section coordinate(float coordx, float coordy);
 
 
  private:
@@ -146,7 +159,23 @@ class RobotLocalization {
   int width_, height_;
   double resolution_;
 
+  // pose and selected box from orb_slam
+  double positionX;
+  double positionY;
+  double orientation;
+  float clength = 4.5;
+  float displacement;
+  Section sect;
+
+  // origin and resolution of the map
+  float mapOriginX;
+  float mapOriginY;
+  float mapResolu;
+  
+
   ros::Publisher position_publisher_;
+  ros::Publisher ptsize_publisher_;
+  ros::Subscriber orb_sub_;
   ros::Subscriber map_sub_;
   ros::Subscriber scan_sub_;
   ros::Subscriber odom_sub_;

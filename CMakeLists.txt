@@ -99,6 +99,7 @@ catkin_package(
   CATKIN_DEPENDS
   roscpp
   geometry_msgs
+  sensor_msgs
   dynamic_reconfigure
   actionlib
   actionlib_msgs
